@@ -1,0 +1,16 @@
+# Streamlit: synth_recommender_app.py, place_guide_agent_app.py
+streamlit>=1.28.0
+python-dotenv>=1.0.0
+
+# LangChain / LangGraph — ChatOpenAI(OpenAI API), OpenAIEmbeddings(RAG), ReAct, StateGraph
+langchain>=1.0.0
+langchain-core>=1.0.0
+langchain-openai>=0.3.0
+langgraph>=0.2.0
+
+# Jupyter — 02_langgraph_basics.ipynb, 03_react_agent.ipynb
+jupyter>=1.0.0
+ipykernel>=6.0.0
+
+# LangGraph 그래프 ASCII 레이아웃(02 노트북 일부 셀)
+grandalf>=0.8
