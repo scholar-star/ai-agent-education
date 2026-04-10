@@ -1,6 +1,6 @@
 """
 seed.yaml v2.0 — 입문자 신디 추천
-- Streamlit 하이브리드 UI (위저드 + 채팅)
+- Streamlit 하이브리드 UI (위저드 + 채팅) · Streamlit Community Cloud 배포 시 App secrets → OPENAI_API_KEY
 - LangGraph: 예산 우선 router → 조건부 엣지 → ReAct(create_react_agent)
 - 로컬 목 + Discogs 검색/릴리즈 상세 + Wikidata 엔티티 클레임 (공식 HTTP API만)
 - explain_beginner: 위키백과 + dictionaryapi.dev
@@ -29,6 +29,52 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import create_react_agent
 
 load_dotenv()
+
+
+def _apply_streamlit_secrets_to_environ() -> None:
+    """Streamlit Cloud(App secrets) 또는 로컬 `.streamlit/secrets.toml` 값을 os.environ에 넣는다.
+
+    LangChain·OpenAI 클라이언트는 `os.environ`/`getenv`를 보므로, Cloud에서는 여기서 주입한다.
+    `load_dotenv()`로 이미 채워진 키는 `setdefault`로 덮어쓰지 않는다.
+    """
+    try:
+        sec = st.secrets
+    except (RuntimeError, FileNotFoundError, TypeError):
+        return
+
+    def _scalar(val: Any) -> str | None:
+        if val is None or isinstance(val, (dict, list)):
+            return None
+        s = str(val).strip()
+        return s or None
+
+    openai_key: str | None = None
+    if "OPENAI_API_KEY" in sec:
+        openai_key = _scalar(sec["OPENAI_API_KEY"])
+    if not openai_key and "openai_api_key" in sec:
+        openai_key = _scalar(sec["openai_api_key"])
+    if not openai_key and "openai" in sec:
+        o = sec["openai"]
+        if isinstance(o, dict):
+            openai_key = _scalar(o.get("api_key"))
+    if openai_key:
+        os.environ.setdefault("OPENAI_API_KEY", openai_key)
+
+    for sk, ek in (
+        ("DISCOGS_PERSONAL_TOKEN", "DISCOGS_PERSONAL_TOKEN"),
+        ("DISCOGS_SEARCH", "DISCOGS_SEARCH"),
+    ):
+        if sk not in sec:
+            continue
+        v = _scalar(sec[sk])
+        if v:
+            os.environ.setdefault(ek, v)
+
+
+def _repo_root() -> Path:
+    """배포 환경에서도 스크립트 기준으로 data/ 등을 찾는다."""
+    return Path(__file__).resolve().parent
+
 
 # Wikipedia / 사전 API 호출 시 식별 가능한 UA (https://foundation.wikimedia.org/wiki/Policy:Wikimedia_Foundation_User-Agent_Policy)
 _WIKI_UA = "SynthRecommenderApp/1.0 (https://github.com/education-local; ko+en Wikipedia API)"
@@ -672,7 +718,7 @@ CATALOG: list[dict[str, Any]] = [
 
 
 def _file_guide_rag_chunks() -> list[str]:
-    path = Path(__file__).resolve().parent / "data" / "synth_rag_corpus.md"
+    path = _repo_root() / "data" / "synth_rag_corpus.md"
     if path.is_file():
         raw = path.read_text(encoding="utf-8")
         parts = re.split(r"\n---\n", raw.strip())
@@ -974,11 +1020,16 @@ def run_smoke_api() -> None:
 
 def _streamlit_main() -> None:
     st.set_page_config(page_title="신디, 뭐 살지 같이 볼까요?", page_icon="🎹")
+    _apply_streamlit_secrets_to_environ()
     st.title("🎹 신디 고르기, 제가 옆에서 도와드릴게요")
     st.caption("가게 메모 + Discogs·Wikidata까지 (seed.yaml v2)")
 
     if not os.getenv("OPENAI_API_KEY"):
-        st.error("열쇠가 없네요. `.env`에 OPENAI_API_KEY를 넣어 주세요.")
+        st.error(
+            "OpenAI API 키가 없어요. **로컬**은 프로젝트 루트 `.env`에 `OPENAI_API_KEY=...` 를 넣거나, "
+            "`.streamlit/secrets.toml`을 쓰면 됩니다. **Streamlit Cloud**는 앱 설정의 **Secrets**에 "
+            "같은 이름(`OPENAI_API_KEY`)으로 넣어 주세요."
+        )
         st.stop()
 
     if "lc_messages" not in st.session_state:
@@ -1021,7 +1072,7 @@ def _streamlit_main() -> None:
         with st.expander("Discogs / Wikidata / RAG가 뭐예요?"):
             st.markdown(
                 "- [Discogs API](https://www.discogs.com/developers): 음반·릴리즈 쪽 정보예요. **시세랑은 별개**예요. 상세는 `get_discogs_release`.\n"
-                "- `.env`: `DISCOGS_PERSONAL_TOKEN`은 있으면 좋고요 · 끄려면 `DISCOGS_SEARCH=0`\n"
+                "- Discogs 토큰: 로컬은 `.env` / 클라우드는 **Secrets**에 `DISCOGS_PERSONAL_TOKEN` · 끄려면 `DISCOGS_SEARCH=0`\n"
                 "- [Wikidata](https://www.wikidata.org/wiki/Wikidata:Data_access): 백과에 적힌 사실만 `wikidata_entity_specs`로.\n"
                 "- **RAG**: 안내집 MD + **진열 메모 요약**을 같이 임베딩 · `rag_search_synth_docs` · `text-embedding-3-small`"
             )
